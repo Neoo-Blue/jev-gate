@@ -36,7 +36,7 @@ The review asks Jev, for every item:
 - each "What you asked" and "What I'm building" bullet: does the final message show all of it done?
 - each clause of your own message: is it a request you still want, and is it shown done? This catches a plan that quietly left part of your message out of its "What you asked" list.
 - each line of the summary: does it commit Claude to later work, or admit that something you asked for is unfinished? Notes about extras you never asked for ("skipped: X, add when Y") pass.
-- the whole reply: is it waiting on something only you can give (a decision, a credential)? Then the gate pauses instead of looping, and the open request is carried into your next message.
+- the whole reply: is it waiting on something only you can give (a decision, a credential)? Then the gate pauses instead of looping. When you answer, Jev decides whether your message continues that request; if it does, the request and its approved plan carry over, and if you've moved on to something else, that starts fresh.
 
 The skill in `skills/jev-gate/SKILL.md` spells out the protocol for Claude.
 
@@ -46,7 +46,7 @@ The skill in `skills/jev-gate/SKILL.md` spells out the protocol for Claude.
 | --- | --- | --- |
 | `TYPESAFE_API_KEY` | none | Required for Jev calls. |
 | `JEV_GATE` | unset | `off` disables the gate. `on` forces it in `claude -p` and Agent SDK runs, which are skipped by default so scripts and automations aren't gated. |
-| `JEV_GATE_MAX_ROUNDS` | `5` | Fix rounds per request before the gate lets the stop through and shows you what is still open. It also lets the stop through as soon as Claude's final message comes back unchanged. |
+| `JEV_GATE_MAX_ROUNDS` | `5` | Fix rounds per request before the gate lets the stop through, shows you what is still open and steps aside until your next message. It also does that as soon as Claude's final message comes back unchanged. |
 
 Each decision is logged, with Jev's probabilities, to `~/.claude/jev-gate/log.jsonl`.
 

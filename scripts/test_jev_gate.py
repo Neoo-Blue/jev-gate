@@ -11,6 +11,7 @@ import jev_gate as g  # noqa: E402
 out = []
 g.emit = out.append
 g.HOME = Path(tempfile.mkdtemp())
+real_jev = g.jev
 SID = "test-session"
 ASK = ("i want you to make a skill with jev, that auto starts everysessions when i asked for something on "
        "claude code, you give out what i asked and what you are building, and have it evaluate if it meets "
@@ -92,17 +93,21 @@ r = last()
 assert r["decision"] == "block" and "[promised] A Claude Code plugin with hooks" in r["reason"], r
 assert "[promised later]" in r["reason"] and "round 2 of" in r["reason"], r  # the failed plan check used round 1
 
-# Blocked on the user: pause instead of looping, and the ask carries into the next prompt.
+# Blocked on the user: pause instead of looping.
 g.jev = fake(i0=0.1, wait=0.9)
 g.on_stop({"session_id": SID, "last_assistant_message": "Which GitHub org should own the repo?"})
-assert "paused" in last()["systemMessage"]
-g.on_prompt({"session_id": SID, "prompt": "use my personal account"})
-assert g.load(SID)["asks"] == [ASK, "use my personal account"] and g.load(SID)["rounds"] == 0
+assert "paused" in last()["systemMessage"] and g.load(SID)["paused"]
 
-# The new turn needs its own plan; then everything delivered passes and later stops are left alone.
+# The answer continues the request (Jev's call): the ask and the plan approval carry over.
 g.jev = fake()
-g.on_stop({"session_id": SID, "last_assistant_message": PLAN})
-g.jev = fake()
+g.on_prompt({"session_id": SID, "prompt": "use my personal account"})
+s = g.load(SID)
+assert s["asks"] == [ASK, "use my personal account"] and s["plan_turn"] == s["turn"] == 2 and s["rounds"] == 0, s
+out.clear()
+g.on_guard({"session_id": SID, "tool_input": {"file_path": "/Users/x/repo/app.py"}})
+assert out == []
+
+# Everything delivered passes, and later stops in the same turn are left alone.
 g.on_stop({"session_id": SID, "last_assistant_message": "All done: plugin at ./jev-gate, repo public."})
 assert last()["systemMessage"].startswith("jev-gate: PASS"), last()
 out.clear()
@@ -110,19 +115,34 @@ g.on_stop({"session_id": SID, "last_assistant_message": "fixed a lint nit"})
 assert out == []
 
 # After a pass the next prompt starts a fresh task.
+g.on_prompt({"session_id": SID, "prompt": "build the report page"})
+assert g.load(SID)["asks"] == ["build the report page"] and "plan" not in g.load(SID)
+
+# Paused again, then a side question Jev doesn't read as a continuation: a fresh request, old plan dropped.
+g.on_stop({"session_id": SID, "last_assistant_message": PLAN})
+g.jev = fake(i0=0.1, wait=0.9)
+g.on_stop({"session_id": SID, "last_assistant_message": "Which chart library should I use?"})
+g.jev = fake(c=0.1)
 g.on_prompt({"session_id": SID, "prompt": "what does YES mean?"})
 assert g.load(SID)["asks"] == ["what does YES mean?"] and "plan" not in g.load(SID)
 
-# A question needs no plan. The same failing reply twice stops early; otherwise the round cap stops it.
+# A question needs no plan. The same failing reply twice stops early and hands the request to the user:
+# edits are no longer blocked and the next message starts fresh.
 g.jev = fake(d=0.1)
 g.on_stop({"session_id": SID, "last_assistant_message": "hmm"})
 assert last()["decision"] == "block"
 g.on_stop({"session_id": SID, "last_assistant_message": "hmm"})
 assert "stopped changing" in last()["systemMessage"] and "what does YES mean?" in last()["systemMessage"]
+out.clear()
+g.on_guard({"session_id": SID, "tool_input": {"file_path": "/Users/x/repo/app.py"}})
+assert out == []
 g.on_prompt({"session_id": SID, "prompt": "and what does WAIT mean?"})
+assert g.load(SID)["asks"] == ["and what does WAIT mean?"]
+
+# Otherwise the round cap stops it.
 for i in range(g.MAX_ROUNDS + 1):
     g.on_stop({"session_id": SID, "last_assistant_message": f"hmm {i}"})
-assert f"after {g.MAX_ROUNDS} rounds" in last()["systemMessage"], last()
+assert f"after {g.MAX_ROUNDS} rounds" in last()["systemMessage"] and not g.load(SID)["open"], last()
 
 
 # Jev unreachable: fail open with a warning, never block.
@@ -138,7 +158,18 @@ assert last() == {"systemMessage": "jev-gate: review skipped (Jev HTTP 503)."} a
 # A Claude Code too old to send last_assistant_message: nothing to review, and it says so.
 g.on_prompt({"session_id": SID, "prompt": "ship it again"})
 g.on_stop({"session_id": SID})
-assert "Update Claude Code" in last()["systemMessage"]
+assert "Update Claude Code" in last()["systemMessage"] and not g.load(SID)["open"]
+
+# A failing `sesame run` (say, no typesafe entry) must reach the fail-open path, not kill the hook.
+bin_dir = Path(tempfile.mkdtemp())
+(bin_dir / "sesame").write_text("#!/bin/sh\necho 'no service named typesafe' >&2\nexit 1\n")
+(bin_dir / "sesame").chmod(0o755)
+os.environ["PATH"] = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+os.environ.pop("TYPESAFE_API_KEY", None)
+g.jev = real_jev
+g.on_prompt({"session_id": SID, "prompt": "ship it once more"})
+g.on_stop({"session_id": SID, "last_assistant_message": "shipped"})
+assert "review skipped (sesame run typesafe failed: no service named typesafe)" in last()["systemMessage"], last()
 
 # Headless and SDK runs are skipped unless forced.
 os.environ["CLAUDE_CODE_ENTRYPOINT"] = "sdk-cli"

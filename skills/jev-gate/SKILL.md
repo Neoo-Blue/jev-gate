@@ -24,7 +24,7 @@ jev-gate holds every request to what the user actually asked. Hooks drive it; th
 4. **Build all of it.**
 5. **Summary.** End with an item-by-item summary: each asked and promised item, what was done, and the evidence (paths, commands and their results, URLs). Report failures as failures.
 6. **Review.** Jev checks that the final message shows every asked item, every promised item and every clause of the user's message done, and that no line promises later work or admits requested work unfinished. Any gap blocks the stop and hands you the list. Finish those items, then write the whole summary again: the review reads only your final message.
-7. After 5 failed rounds per request (`JEV_GATE_MAX_ROUNDS`), or as soon as your final message comes back unchanged from a failed round, the stop goes through and the user sees what is still open.
+7. After 5 failed rounds per request (`JEV_GATE_MAX_ROUNDS`), or as soon as your final message comes back unchanged from a failed round, the stop goes through, the user sees what is still open, and the gate steps aside until their next message, which starts a fresh request.
 
 ## Skip the plan when
 
@@ -32,7 +32,7 @@ The request is a question, an explanation or chat. Just answer; the review still
 
 ## Blocked on the user
 
-If an item truly needs something only the user has (a decision, credentials, access, a physical step), ask for it plainly and stop. Jev recognizes a reply that is waiting on the user and pauses instead of looping; the unfinished request carries over into the user's next message and is judged together with it.
+If an item truly needs something only the user has (a decision, credentials, access, a physical step), ask for it plainly and stop. Jev recognizes a reply that is waiting on the user and pauses instead of looping. When the user replies, Jev decides whether the reply continues that request: if so, the request and its approved plan carry over and are judged together with the reply; if the user moved on, the new message starts fresh.
 
 ## Passing honestly
 

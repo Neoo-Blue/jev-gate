@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -35,7 +36,7 @@ WAIT = 0.7  # a reply that is blocked on the user pauses the gate instead of loo
 MAX_ROUNDS = int(os.environ.get("JEV_GATE_MAX_ROUNDS") or 5)
 HOME = Path.home() / ".claude" / "jev-gate"
 SCRIPT = Path(__file__).resolve()
-RAW = ""  # the hook input, kept so jev() can re-run the hook under `sesame run`
+RAW = ""  # the hook input, kept so jev() can run the hook again under `sesame run`
 
 HEAD = re.compile(
     r"^[\s#>*_]*(what you asked(?: for)?|what i['’]?m building|what i am building|what i['’]?ll build"
@@ -79,6 +80,12 @@ LATER = ("Does `sentence`, a line of `final_reply`, commit the assistant to doin
          "\"next I'll\", \"TODO\").",
          "No commitment by the assistant: it reports, explains, suggests, offers or asks (\"want me to...?\", "
          "\"let me know\"), or tells the user what they could do or add later.")
+CONTINUES = ("Is `new_message` the user's reply to `assistant_stopped_on`, or otherwise a continuation of the "
+             "request in `earlier_messages`?",
+             "It answers the assistant's question (even a bare name, number, choice, yes or no counts), confirms, "
+             "corrects or adds to the same request.",
+             "It ignores the question and starts something unrelated, asks about another topic, or drops the old "
+             "request.")
 WAITING = ("Is `final_reply` stopping to wait for the user, asking for something only they can give (a "
            "decision, credentials, access, a physical action) that the remaining requested work cannot go "
            "on without?",
@@ -185,10 +192,14 @@ def jev(state: dict, questions: dict) -> dict:
     """Ask Jev every question in one request; {id: probability of yes}. Raises on any failure."""
     key = os.environ.get("TYPESAFE_API_KEY", "").strip()
     if not key and "JEV_GATE_INPUT" not in os.environ and shutil.which("sesame"):
-        # Key kept in the sesame keychain: re-run this hook with it injected.
-        os.environ["JEV_GATE_INPUT"] = RAW
-        sys.stdout.flush()
-        os.execvp("sesame", ["sesame", "run", "typesafe", "--", sys.executable, str(SCRIPT)] + sys.argv[1:])
+        # Key kept in the sesame keychain: run this hook again with it injected and pass its answer on.
+        # A child process, not exec, so a sesame failure still lands in the caller's fail-open path.
+        r = subprocess.run(["sesame", "run", "typesafe", "--", sys.executable, str(SCRIPT)] + sys.argv[1:],
+                           env={**os.environ, "JEV_GATE_INPUT": RAW}, capture_output=True, text=True, timeout=100)
+        if r.returncode != 0:
+            raise RuntimeError(f"sesame run typesafe failed: {(r.stderr or r.stdout).strip()[:200]}")
+        sys.stdout.write(r.stdout)
+        sys.exit(0)
     if not key:
         raise RuntimeError("TYPESAFE_API_KEY is not set")
     body = json.dumps({"state": state, "model": MODEL, "questions": questions}).encode()
@@ -212,14 +223,15 @@ def listed(gaps: list) -> str:
 def retry(sid: str, s: dict, what: str, gaps: list, how: str, reply: str) -> None:
     seen = hashlib.sha1(reply.encode()).hexdigest()
     stuck = seen == s.get("last_reply")  # same reply as the last failed round: going around in circles
-    s["last_reply"] = seen
-    s["rounds"] = s.get("rounds", 0) + 1
-    save(sid, s)
+    s.update(last_reply=seen, rounds=s.get("rounds", 0) + 1)
     if stuck or s["rounds"] > MAX_ROUNDS:
+        s["open"] = False  # handed to the user, so the next message starts fresh instead of dragging this along
+        save(sid, s)
         why = "Claude's reply stopped changing" if stuck else f"{MAX_ROUNDS} rounds"
         emit({"systemMessage": f"jev-gate: the {what} still fails after {why}, stopping so you can decide. "
                                f"Open:\n{listed(gaps)}"})
         return
+    save(sid, s)
     emit({"decision": "block",
           "reason": f"jev-gate {what}, round {s['rounds']} of {MAX_ROUNDS}: FAIL. {how}\n{listed(gaps)}"})
 
@@ -227,11 +239,22 @@ def retry(sid: str, s: dict, what: str, gaps: list, how: str, reply: str) -> Non
 def on_prompt(inp: dict) -> None:
     sid = inp.get("session_id") or ""
     s = load(sid)
-    if not s.get("open"):  # the last request passed (or none yet): start a new one
+    prompt = (inp.get("prompt") or "")[:8000]
+    carry = False
+    if s.get("open") and s.get("asks"):  # an unfinished request (paused or interrupted): does this continue it?
+        try:
+            state = {"earlier_messages": s["asks"], "assistant_stopped_on": s.get("paused_on", ""), "new_message": prompt}
+            carry = jev(state, {"c": noul(CONTINUES)})["c"] >= YES
+        except Exception:  # noqa: BLE001 - when unsure, start fresh rather than judge against the old request
+            carry = False
+    # Answering the question an approved plan stopped on keeps the approval; anything else plans anew.
+    keep = carry and s.get("paused") and s.get("plan_turn") == s.get("turn")
+    if not carry:
         s = {"turn": s.get("turn", 0)}
-    # An unfinished request carries over, so a reply like "use option B" is judged with it.
-    s["asks"] = (s.get("asks", []) + [(inp.get("prompt") or "")[:8000]])[-6:]
-    s.update(turn=s["turn"] + 1, rounds=0, open=True, last_reply=None)
+    s["asks"] = (s.get("asks", []) + [prompt])[-6:]
+    s.update(turn=s["turn"] + 1, rounds=0, open=True, paused=False, paused_on="", last_reply=None)
+    if keep:
+        s["plan_turn"] = s["turn"]
     save(sid, s)
     emit({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": PROTOCOL}})
 
@@ -261,6 +284,8 @@ def on_stop(inp: dict) -> None:
     if not s.get("open") or not s.get("asks"):
         return
     if "last_assistant_message" not in inp:
+        s["open"] = False
+        save(sid, s)
         emit({"systemMessage": "jev-gate: this Claude Code version doesn't pass last_assistant_message to Stop "
                                "hooks, so there is nothing to review. Update Claude Code."})
         return
@@ -336,6 +361,7 @@ def review(sid: str, s: dict, reply: str) -> None:
         emit({"systemMessage": f"jev-gate: PASS, Jev sees every asked and promised item delivered{after}."})
         return
     if p["wait"] >= WAIT:
+        s.update(paused=True, paused_on=reply[-2000:])
         save(sid, s)
         emit({"systemMessage": f"jev-gate: paused for your answer. Still open:\n{listed(gaps)}"})
         return
