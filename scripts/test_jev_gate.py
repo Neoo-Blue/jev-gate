@@ -54,6 +54,10 @@ assert building == ["A Claude Code plugin with hooks", "what you asked about is 
 assert g.contract("**What you asked:** build X\n**What I'm building:** X.py") == (["build X"], ["X.py"])
 assert g.contract("你要的：\n- 技能\n我要做的：\n- 插件") == (["技能"], ["插件"])
 assert g.contract("Done. Everything works.") == ([], [])
+# Seen live: file contents in a code block under a bullet were read as extra deliverables.
+assert g.contract("What you asked:\n- todo.md with two bullets\nWhat I'm building:\n- `todo.md`, containing:\n"
+                  "  ```\n  - buy milk\n  - call mom\n  ```") == (
+    ["todo.md with two bullets"], ["`todo.md`, containing: - buy milk - call mom"])
 
 # A new request opens a task and tells Claude the protocol.
 g.on_prompt({"session_id": SID, "prompt": ASK})

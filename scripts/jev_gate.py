@@ -168,7 +168,15 @@ def clauses(text: str, least: int = 6, longest: int = 25) -> list:
 def contract(text: str) -> tuple:
     """The "What you asked" / "What I'm building" bullet lists in a message, or ([], [])."""
     got, cur = {}, None
+    fence = False
     for line in text.splitlines():
+        if line.strip().startswith("```"):
+            fence = not fence
+            continue
+        if fence:  # a code block belongs to the item above it; bullets inside it are content, not items
+            if cur and got[cur]:
+                got[cur][-1] += " " + line.strip()
+            continue
         m = HEAD.match(line)
         if m:
             cur = "asked" if re.search(r"asked|你要|你的", m.group(1), re.I) else "building"
