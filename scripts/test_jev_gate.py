@@ -31,9 +31,9 @@ Starting once Jev approves."""
 
 def fake(**probs):
     """Jev stand-in: probability by question id, then by id prefix; judgments default to yes (0.9),
-    the open-work and waiting flags (l, u, wait) to no (0.1)."""
+    the promised-later and waiting flags (l, wait) to no (0.1)."""
     def ask(state, qs):
-        return {k: probs.get(k, probs.get(k[0], 0.1 if k[0] in "lu" or k == "wait" else 0.9)) for k in qs}
+        return {k: probs.get(k, probs.get(k[0], 0.1 if k[0] == "l" or k == "wait" else 0.9)) for k in qs}
     return ask
 
 
@@ -85,12 +85,12 @@ out.clear()
 g.on_stop({"session_id": SID, "last_assistant_message": "waiting", "background_tasks": [{"id": "t1"}]})
 assert out == []
 
-# The review fails on an undelivered promise and on a line that leaves work open.
+# The review fails on an undelivered promise and on a line promising later work.
 g.jev = fake(i2=0.1, l0=0.8)
 g.on_stop({"session_id": SID, "last_assistant_message": "Built the plugin.\nI will publish it tomorrow."})
 r = last()
 assert r["decision"] == "block" and "[promised] A Claude Code plugin with hooks" in r["reason"], r
-assert "[left open]" in r["reason"] and "round 2 of" in r["reason"], r  # the failed plan check used round 1
+assert "[promised later]" in r["reason"] and "round 2 of" in r["reason"], r  # the failed plan check used round 1
 
 # Blocked on the user: pause instead of looping, and the ask carries into the next prompt.
 g.jev = fake(i0=0.1, wait=0.9)

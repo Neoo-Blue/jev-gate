@@ -71,18 +71,14 @@ DONE = ("Does `final_reply` show that all of `item` has been done or answered?",
         "or links.",
         "Any part is missing from the reply, only restated as a plan, or called partial, pending, skipped or next.")
 DONE_FRAG = ("Does `final_reply` show that all of what `fragment` asks for has been done or answered?",) + DONE[1:]
-# Two narrow questions per summary line beat one broad one: on 19 labelled lines the broad version
-# came within 0.03 of flagging "skipped: X, add when Y" notes; the pair kept a 0.20 margin.
+# One question per summary line: does it commit to later work? A second one, "does it admit requested
+# work unfinished?", misread lines describing tests built to fail ("a plan missing the publish step
+# failed the check": 0.90). DONE reads the whole reply and catches real admissions instead.
 LATER = ("Does `sentence`, a line of `final_reply`, commit the assistant to doing something after this reply?",
          "The assistant says it will do, check or finish something later (\"I will\", \"I'll keep an eye\", "
          "\"next I'll\", \"TODO\").",
          "No commitment by the assistant: it reports, explains, suggests, offers or asks (\"want me to...?\", "
          "\"let me know\"), or tells the user what they could do or add later.")
-UNMET = ("Does `sentence`, a line of `final_reply`, say that something the user asked for in `user_messages`, or "
-         "an item of `plan.building`, is not fully done?",
-         "It says a requested or planned item is unfinished, pending, blocked, remaining or skipped.",
-         "It is about finished work, or about something outside the request and plan, such as an optional extra "
-         "left out on purpose, a known limitation, or a suggestion.")
 WAITING = ("Is `final_reply` stopping to wait for the user, asking for something only they can give (a "
            "decision, credentials, access, a physical action) that the remaining requested work cannot go "
            "on without?",
@@ -320,7 +316,7 @@ def review(sid: str, s: dict, reply: str) -> None:
     for j, f in enumerate(frags):
         qs[f"r{j}"], qs[f"d{j}"] = noul(REQUEST, fragment=f), noul(DONE_FRAG, fragment=f)
     for k, line in enumerate(lines):
-        qs[f"l{k}"], qs[f"u{k}"] = noul(LATER, sentence=line), noul(UNMET, sentence=line)
+        qs[f"l{k}"] = noul(LATER, sentence=line)
     try:
         p = jev(state, qs)
     except Exception as e:  # noqa: BLE001 - fail open
@@ -331,8 +327,7 @@ def review(sid: str, s: dict, reply: str) -> None:
     gaps = [f"[{kind}] {x} (Jev {p[f'i{i}']:.2f})" for i, (kind, x) in enumerate(items) if p[f"i{i}"] < YES]
     gaps += [f'[your words] "{f}" (Jev {p[f"d{j}"]:.2f})' for j, f in enumerate(frags)
              if p[f"r{j}"] >= YES and p[f"d{j}"] < YES]
-    gaps += [f'[left open] "{line}" (Jev {max(p[f"l{k}"], p[f"u{k}"]):.2f})' for k, line in enumerate(lines)
-             if max(p[f"l{k}"], p[f"u{k}"]) >= YES]
+    gaps += [f'[promised later] "{line}" (Jev {p[f"l{k}"]:.2f})' for k, line in enumerate(lines) if p[f"l{k}"] >= YES]
     log(sid, "review", p, gaps)
     if not gaps:
         s["open"] = False
