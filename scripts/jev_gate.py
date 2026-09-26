@@ -16,6 +16,7 @@ Fails open: without a key, or on any network or API error, it warns and never bl
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -136,7 +137,7 @@ def log(sid: str, event: str, p: dict, gaps: list) -> None:
 
 def units(text: str) -> int:
     """Rough word count: Latin words, plus one per CJK character."""
-    return len(re.findall(r"[A-Za-z0-9_'’]+|[぀-ヿ㐀-鿿가-힯豈-﫿]", text))
+    return len(re.findall(r"[A-Za-z0-9_'\u2019]+|[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff]", text))
 
 
 def clauses(text: str, least: int = 6, longest: int = 25) -> list:
@@ -212,12 +213,16 @@ def listed(gaps: list) -> str:
     return "\n".join(f"- {g}" for g in gaps)
 
 
-def retry(sid: str, s: dict, what: str, gaps: list, how: str) -> None:
+def retry(sid: str, s: dict, what: str, gaps: list, how: str, reply: str) -> None:
+    seen = hashlib.sha1(reply.encode()).hexdigest()
+    stuck = seen == s.get("last_reply")  # same reply as the last failed round: going around in circles
+    s["last_reply"] = seen
     s["rounds"] = s.get("rounds", 0) + 1
     save(sid, s)
-    if s["rounds"] > MAX_ROUNDS:
-        emit({"systemMessage": f"jev-gate: the {what} still fails after {MAX_ROUNDS} rounds, stopping so you "
-                               f"can decide. Open:\n{listed(gaps)}"})
+    if stuck or s["rounds"] > MAX_ROUNDS:
+        why = "Claude's reply stopped changing" if stuck else f"{MAX_ROUNDS} rounds"
+        emit({"systemMessage": f"jev-gate: the {what} still fails after {why}, stopping so you can decide. "
+                               f"Open:\n{listed(gaps)}"})
         return
     emit({"decision": "block",
           "reason": f"jev-gate {what}, round {s['rounds']} of {MAX_ROUNDS}: FAIL. {how}\n{listed(gaps)}"})
@@ -230,7 +235,7 @@ def on_prompt(inp: dict) -> None:
         s = {"turn": s.get("turn", 0)}
     # An unfinished request carries over, so a reply like "use option B" is judged with it.
     s["asks"] = (s.get("asks", []) + [(inp.get("prompt") or "")[:8000]])[-6:]
-    s.update(turn=s["turn"] + 1, rounds=0, open=True)
+    s.update(turn=s["turn"] + 1, rounds=0, open=True, last_reply=None)
     save(sid, s)
     emit({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": PROTOCOL}})
 
@@ -259,18 +264,22 @@ def on_stop(inp: dict) -> None:
     s = load(sid)
     if not s.get("open") or not s.get("asks"):
         return
-    reply = inp.get("last_assistant_message") or ""
+    if "last_assistant_message" not in inp:
+        emit({"systemMessage": "jev-gate: this Claude Code version doesn't pass last_assistant_message to Stop "
+                               "hooks, so there is nothing to review. Update Claude Code."})
+        return
+    reply = inp["last_assistant_message"] or ""
     if s.get("plan_turn") != s.get("turn"):
         asked, building = contract(reply)
         if asked and building:
-            return check_plan(sid, s, asked, building)
+            return check_plan(sid, s, asked, building, reply)
         if asked or building:
             return retry(sid, s, "plan check", ["the plan needs both lists"],
-                         "Send \"What you asked:\" and \"What I'm building:\" together, then end your message.")
+                         "Send \"What you asked:\" and \"What I'm building:\" together, then end your message.", reply)
     review(sid, s, reply)
 
 
-def check_plan(sid: str, s: dict, asked: list, building: list) -> None:
+def check_plan(sid: str, s: dict, asked: list, building: list, reply: str) -> None:
     asked, building = asked[:30], building[:30]
     frags = clauses("\n".join(s["asks"]))[:40]
     state = {"user_messages": s["asks"], "plan": {"asked": asked, "building": building}}
@@ -291,7 +300,7 @@ def check_plan(sid: str, s: dict, asked: list, building: list) -> None:
              if p[f"r{j}"] >= YES and p[f"c{j}"] < YES]
     log(sid, "plan", p, gaps)
     if gaps:
-        return retry(sid, s, "plan check", gaps, PLAN_FAIL)
+        return retry(sid, s, "plan check", gaps, PLAN_FAIL, reply)
     s["plan_turn"] = s["turn"]
     save(sid, s)
     emit({"systemMessage": f"jev-gate: Jev approved the plan ({len(asked)} asked, {len(building)} to build).",
@@ -335,7 +344,7 @@ def review(sid: str, s: dict, reply: str) -> None:
         save(sid, s)
         emit({"systemMessage": f"jev-gate: paused for your answer. Still open:\n{listed(gaps)}"})
         return
-    retry(sid, s, "review", gaps, REVIEW_FAIL)
+    retry(sid, s, "review", gaps, REVIEW_FAIL, reply)
 
 
 def main() -> None:

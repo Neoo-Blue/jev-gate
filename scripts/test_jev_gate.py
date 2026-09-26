@@ -113,11 +113,16 @@ assert out == []
 g.on_prompt({"session_id": SID, "prompt": "what does YES mean?"})
 assert g.load(SID)["asks"] == ["what does YES mean?"] and "plan" not in g.load(SID)
 
-# A question needs no plan; failing past the round cap stops with the open items for the user.
+# A question needs no plan. The same failing reply twice stops early; otherwise the round cap stops it.
 g.jev = fake(d=0.1)
-for _ in range(g.MAX_ROUNDS + 1):
-    g.on_stop({"session_id": SID, "last_assistant_message": "hmm"})
-assert "still fails after" in last()["systemMessage"] and "what does YES mean?" in last()["systemMessage"]
+g.on_stop({"session_id": SID, "last_assistant_message": "hmm"})
+assert last()["decision"] == "block"
+g.on_stop({"session_id": SID, "last_assistant_message": "hmm"})
+assert "stopped changing" in last()["systemMessage"] and "what does YES mean?" in last()["systemMessage"]
+g.on_prompt({"session_id": SID, "prompt": "and what does WAIT mean?"})
+for i in range(g.MAX_ROUNDS + 1):
+    g.on_stop({"session_id": SID, "last_assistant_message": f"hmm {i}"})
+assert f"after {g.MAX_ROUNDS} rounds" in last()["systemMessage"], last()
 
 
 # Jev unreachable: fail open with a warning, never block.
@@ -129,6 +134,11 @@ g.jev = down
 g.on_prompt({"session_id": SID, "prompt": "ship it"})
 g.on_stop({"session_id": SID, "last_assistant_message": "shipped"})
 assert last() == {"systemMessage": "jev-gate: review skipped (Jev HTTP 503)."} and not g.load(SID)["open"]
+
+# A Claude Code too old to send last_assistant_message: nothing to review, and it says so.
+g.on_prompt({"session_id": SID, "prompt": "ship it again"})
+g.on_stop({"session_id": SID})
+assert "Update Claude Code" in last()["systemMessage"]
 
 # Headless and SDK runs are skipped unless forced.
 os.environ["CLAUDE_CODE_ENTRYPOINT"] = "sdk-cli"

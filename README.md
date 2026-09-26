@@ -7,7 +7,7 @@ Every time you ask Claude Code for something:
 1. Claude replies with **What you asked** and **What I'm building**.
 2. Jev, TypeSafe's judgment model, checks that plan against your request, clause by clause. Only a plan that covers everything gets built; file edits stay blocked until then.
 3. Claude builds it and ends with an item-by-item summary.
-4. Jev reviews that summary. Anything you asked for that isn't shown as delivered, anything Claude promised and didn't deliver, and any "I'll do that later" sends the task back to Claude with the missing items quoted. This repeats until Jev passes it (5 rounds at most, then you decide).
+4. Jev reviews that summary. Anything you asked for that isn't shown as delivered, anything Claude promised and didn't deliver, and any "I'll do that later" sends the task back to Claude with the missing items quoted. This repeats until Jev passes it (5 rounds at most, fewer if Claude's reply stops changing; then you decide).
 
 ## Install
 
@@ -46,7 +46,7 @@ The skill in `skills/jev-gate/SKILL.md` spells out the protocol for Claude.
 | --- | --- | --- |
 | `TYPESAFE_API_KEY` | none | Required for Jev calls. |
 | `JEV_GATE` | unset | `off` disables the gate. `on` forces it in `claude -p` and Agent SDK runs, which are skipped by default so scripts and automations aren't gated. |
-| `JEV_GATE_MAX_ROUNDS` | `5` | Fix rounds per request before the gate lets the stop through and shows you what is still open. |
+| `JEV_GATE_MAX_ROUNDS` | `5` | Fix rounds per request before the gate lets the stop through and shows you what is still open. It also lets the stop through as soon as Claude's final message comes back unchanged. |
 
 Each decision is logged, with Jev's probabilities, to `~/.claude/jev-gate/log.jsonl`.
 
@@ -55,6 +55,7 @@ Each decision is logged, with Jev's probabilities, to `~/.claude/jev-gate/log.js
 - Jev reads the summary, not the code. The gate keeps Claude honest about scope, not about correctness; keep your tests and code review.
 - The edit guard covers Edit, Write and NotebookEdit. Changes made through Bash aren't blocked, though the review still covers what they were for.
 - Jev is trained mainly on English. Other languages work, with lower accuracy.
+- A request whose own instructions rule out a full summary (a one-line reply, say) can't pass. The gate notices when Claude's reply stops changing and hands the open items to you.
 - It fails open: a missing key, network trouble or an API error never blocks you; you get a warning instead.
 - Your prompts, Claude's plan and its final summary are sent to TypeSafe's API (`api.typesafe.ai`) to be judged.
 

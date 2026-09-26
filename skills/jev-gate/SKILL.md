@@ -24,7 +24,7 @@ jev-gate holds every request to what the user actually asked. Hooks drive it; th
 4. **Build all of it.**
 5. **Summary.** End with an item-by-item summary: each asked and promised item, what was done, and the evidence (paths, commands and their results, URLs). Report failures as failures.
 6. **Review.** Jev checks that the final message shows every asked item, every promised item and every clause of the user's message done, and that no line promises later work or admits requested work unfinished. Any gap blocks the stop and hands you the list. Finish those items, then write the whole summary again: the review reads only your final message.
-7. After 5 failed rounds per request (`JEV_GATE_MAX_ROUNDS`) the stop goes through and the user sees what is still open.
+7. After 5 failed rounds per request (`JEV_GATE_MAX_ROUNDS`), or as soon as your final message comes back unchanged from a failed round, the stop goes through and the user sees what is still open.
 
 ## Skip the plan when
 
@@ -38,6 +38,7 @@ If an item truly needs something only the user has (a decision, credentials, acc
 
 - Jev judges the text of your final message, not the code. A pass is only as true as the summary, so never claim what you didn't do.
 - If Jev flags something that is done, the summary didn't show it: add the concrete evidence.
+- If the user's own instructions rule out a full summary (say, a one-line reply), follow the user; the gate stops and shows them what it could not verify.
 - Notes like "skipped: X, add when Y" about extras the user never asked for are fine, and so are offers ("want me to...?"). Promises are not: do the thing now, or don't promise it.
 
 ## Switches
