@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "jev-gate",
+  "description": "Make Claude Code build everything you asked, with Jev as the referee.",
+  "owner": {
+    "name": "Neoo-Blue",
+    "url": "https://github.com/Neoo-Blue"
+  },
+  "plugins": [
+    {
+      "name": "jev-gate",
+      "description": "Jev checks the plan before Claude builds and the summary before it stops; gaps send the task back.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

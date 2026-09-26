@@ -1,0 +1,13 @@
+{
+  "name": "jev-gate",
+  "version": "0.1.0",
+  "description": "Jev (TypeSafe) checks Claude's plan against your request before it builds, and its final summary before it stops. Anything missing or promised but undelivered sends the task back until Jev passes it.",
+  "author": {
+    "name": "Neoo-Blue",
+    "url": "https://github.com/Neoo-Blue"
+  },
+  "homepage": "https://github.com/Neoo-Blue/jev-gate",
+  "repository": "https://github.com/Neoo-Blue/jev-gate",
+  "license": "MIT",
+  "keywords": ["claude-code", "hooks", "typesafe", "jev", "requirements", "review"]
+}
