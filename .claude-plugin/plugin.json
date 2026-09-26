@@ -1,6 +1,6 @@
 {
   "name": "jev-gate",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Jev (TypeSafe) checks Claude's plan against your request before it builds, and its final summary before it stops. Anything missing or promised but undelivered sends the task back until Jev passes it.",
   "author": {
     "name": "Neoo-Blue",

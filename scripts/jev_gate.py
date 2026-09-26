@@ -34,6 +34,9 @@ MODEL = "jev-latest"
 YES = 0.5   # ponytail: one threshold for every question; split it per question if the log shows misses
 WAIT = 0.7  # a reply that is blocked on the user pauses the gate instead of looping
 MAX_ROUNDS = int(os.environ.get("JEV_GATE_MAX_ROUNDS") or 5)
+# Seconds a Jev call may take, kept under each hook's timeout in hooks.json (UserPromptSubmit 30,
+# Stop 120) so a hang ends in this script's fail-open path instead of Claude Code killing the hook.
+PROMPT_BUDGET, STOP_BUDGET = 15.0, 90.0
 HOME = Path.home() / ".claude" / "jev-gate"
 SCRIPT = Path(__file__).resolve()
 RAW = ""  # the hook input, kept so jev() can run the hook again under `sesame run`
@@ -196,14 +199,16 @@ def noul(q: tuple, **data) -> dict:
     return {"type": "noul", "instructions": {**data, "question": q[0]}, "criteria": {"true": q[1], "false": q[2]}}
 
 
-def jev(state: dict, questions: dict) -> dict:
-    """Ask Jev every question in one request; {id: probability of yes}. Raises on any failure."""
+def jev(state: dict, questions: dict, budget: float = STOP_BUDGET) -> dict:
+    """Ask Jev every question in one request; {id: probability of yes}. Raises on any failure, and
+    gives up within `budget` seconds."""
+    deadline = time.monotonic() + budget
     key = os.environ.get("TYPESAFE_API_KEY", "").strip()
     if not key and "JEV_GATE_INPUT" not in os.environ and shutil.which("sesame"):
         # Key kept in the sesame keychain: run this hook again with it injected and pass its answer on.
         # A child process, not exec, so a sesame failure still lands in the caller's fail-open path.
         r = subprocess.run(["sesame", "run", "typesafe", "--", sys.executable, str(SCRIPT)] + sys.argv[1:],
-                           env={**os.environ, "JEV_GATE_INPUT": RAW}, capture_output=True, text=True, timeout=100)
+                           env={**os.environ, "JEV_GATE_INPUT": RAW}, capture_output=True, text=True, timeout=budget)
         if r.returncode != 0:
             raise RuntimeError(f"sesame run typesafe failed: {(r.stderr or r.stdout).strip()[:200]}")
         sys.stdout.write(r.stdout)
@@ -214,13 +219,14 @@ def jev(state: dict, questions: dict) -> dict:
     req = urllib.request.Request(URL, body, {"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(req, timeout=25) as r:
+            with urllib.request.urlopen(req, timeout=max(1.0, min(25.0, deadline - time.monotonic()))) as r:
                 answers = json.load(r)["answers"]
             return {k: float(answers[k]["noul"]) for k in questions}
         except urllib.error.HTTPError as e:
-            if attempt == 2 or (e.code != 429 and e.code < 500):
+            wait = min(10.0, float(e.headers.get("retry-after") or 2 ** attempt))
+            if attempt == 2 or (e.code != 429 and e.code < 500) or time.monotonic() + wait > deadline:
                 raise RuntimeError(f"Jev HTTP {e.code}: {e.read()[:200].decode('utf-8', 'replace')}") from None
-            time.sleep(min(10.0, float(e.headers.get("retry-after") or 2 ** attempt)))
+            time.sleep(wait)
     raise RuntimeError("unreachable")
 
 
@@ -252,7 +258,7 @@ def on_prompt(inp: dict) -> None:
     if s.get("open") and s.get("asks"):  # an unfinished request (paused or interrupted): does this continue it?
         try:
             state = {"earlier_messages": s["asks"], "assistant_stopped_on": s.get("paused_on", ""), "new_message": prompt}
-            carry = jev(state, {"c": noul(CONTINUES)})["c"] >= YES
+            carry = jev(state, {"c": noul(CONTINUES)}, budget=PROMPT_BUDGET)["c"] >= YES
         except Exception:  # noqa: BLE001 - when unsure, start fresh rather than judge against the old request
             carry = False
     # Answering the question an approved plan stopped on keeps the approval; anything else plans anew.

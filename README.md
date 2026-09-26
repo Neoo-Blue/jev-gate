@@ -35,7 +35,7 @@ The review asks Jev, for every item:
 
 - each "What you asked" and "What I'm building" bullet: does the final message show all of it done?
 - each clause of your own message: is it a request you still want, and is it shown done? This catches a plan that quietly left part of your message out of its "What you asked" list.
-- each line of the summary: does it commit Claude to later work, or admit that something you asked for is unfinished? Notes about extras you never asked for ("skipped: X, add when Y") pass.
+- each line of the summary: does it commit Claude to later work ("I'll do X next")? Offers, and notes about extras you never asked for ("skipped: X, add when Y"), pass. A line admitting that something you asked for isn't done is caught by the first two checks, which read the whole summary; a separate per-line check for that misread lines describing tests built to fail, so it was dropped.
 - the whole reply: is it waiting on something only you can give (a decision, a credential)? Then the gate pauses instead of looping. When you answer, Jev decides whether your message continues that request; if it does, the request and its approved plan carry over, and if you've moved on to something else, that starts fresh.
 
 The skill in `skills/jev-gate/SKILL.md` spells out the protocol for Claude.

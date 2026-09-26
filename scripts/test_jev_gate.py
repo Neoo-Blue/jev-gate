@@ -33,7 +33,7 @@ Starting once Jev approves."""
 def fake(**probs):
     """Jev stand-in: probability by question id, then by id prefix; judgments default to yes (0.9),
     the promised-later and waiting flags (l, wait) to no (0.1)."""
-    def ask(state, qs):
+    def ask(state, qs, **_):
         return {k: probs.get(k, probs.get(k[0], 0.1 if k[0] == "l" or k == "wait" else 0.9)) for k in qs}
     return ask
 
@@ -150,7 +150,7 @@ assert f"after {g.MAX_ROUNDS} rounds" in last()["systemMessage"] and not g.load(
 
 
 # Jev unreachable: fail open with a warning, never block.
-def down(state, qs):
+def down(state, qs, **_):
     raise RuntimeError("Jev HTTP 503")
 
 
@@ -174,6 +174,15 @@ g.jev = real_jev
 g.on_prompt({"session_id": SID, "prompt": "ship it once more"})
 g.on_stop({"session_id": SID, "last_assistant_message": "shipped"})
 assert "review skipped (sesame run typesafe failed: no service named typesafe)" in last()["systemMessage"], last()
+
+# A hanging `sesame run` while routing a reply after a pause: give up inside the budget and start fresh,
+# rather than let Claude Code's 30 s hook timeout kill the hook with the state half-updated.
+(bin_dir / "sesame").write_text("#!/bin/sh\nsleep 5\n")
+g.PROMPT_BUDGET = 1.0
+g.save(SID, {"turn": 7, "open": True, "paused": True, "asks": ["build X"], "plan_turn": 7})
+g.on_prompt({"session_id": SID, "prompt": "Neoo-Blue"})
+s = g.load(SID)
+assert s["asks"] == ["Neoo-Blue"] and s["turn"] == 8 and "plan_turn" not in s, s
 
 # Headless and SDK runs are skipped unless forced.
 os.environ["CLAUDE_CODE_ENTRYPOINT"] = "sdk-cli"

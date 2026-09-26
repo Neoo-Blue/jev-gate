@@ -23,7 +23,7 @@ jev-gate holds every request to what the user actually asked. Hooks drive it; th
 3. **Plan check.** When you stop, Jev checks each "What you asked" item, and each clause of the user's own message, against "What I'm building". Approved: you are told to build. Not approved: the uncovered items come back quoted; fix the lists and stop again. Edit, Write and NotebookEdit are blocked until approval (except under `~/.claude` and temp dirs). Don't route around that with Bash.
 4. **Build all of it.**
 5. **Summary.** End with an item-by-item summary: each asked and promised item, what was done, and the evidence (paths, commands and their results, URLs). Report failures as failures.
-6. **Review.** Jev checks that the final message shows every asked item, every promised item and every clause of the user's message done, and that no line promises later work or admits requested work unfinished. Any gap blocks the stop and hands you the list. Finish those items, then write the whole summary again: the review reads only your final message.
+6. **Review.** Jev checks that the final message shows every asked item, every promised item and every clause of the user's message done, and that no line promises later work. Any gap blocks the stop and hands you the list. Finish those items, then write the whole summary again: the review reads only your final message.
 7. After 5 failed rounds per request (`JEV_GATE_MAX_ROUNDS`), or as soon as your final message comes back unchanged from a failed round, the stop goes through, the user sees what is still open, and the gate steps aside until their next message, which starts a fresh request.
 
 ## Skip the plan when
